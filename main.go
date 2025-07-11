@@ -30,6 +30,21 @@ type apiConfig struct {
 	DB				*database.Queries 
 }
 
+type User struct {
+	ID        string    `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
+}
+
+type Chirp struct {
+    ID        uuid.UUID `json:"id"`
+    CreatedAt time.Time `json:"created_at"`
+    UpdatedAt time.Time `json:"updated_at"`
+    Body      string    `json:"body"`
+    UserID    uuid.UUID `json:"user_id"`
+}
+
 // middlewareMetricsInc creates a middleware that increments the hit counter
 // for each request before calling the next handler.
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -126,6 +141,7 @@ func main() {
 	mux.Handle("GET /api/healthz", middlewareLog(http.HandlerFunc(healthzHandler)))
 	mux.Handle("POST /api/users", middlewareLog(http.HandlerFunc(apiCfg.handlerCreateUser)))
 	mux.Handle("POST /api/chirps", middlewareLog(http.HandlerFunc(apiCfg.handlerCreateChirp)))
+	mux.Handle("GET /api/chirps", middlewareLog(http.HandlerFunc(apiCfg.handlerGetChirps)))
 
 	mux.Handle("POST /admin/reset", middlewareLog(http.HandlerFunc(apiCfg.handlerReset)))
 	mux.Handle("GET /admin/metrics", middlewareLog(http.HandlerFunc(apiCfg.handlerMetrics)))
@@ -164,13 +180,6 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 		Email string `json:"email"`
 	}
 
-	type returnVals struct {
-		ID        string    `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
-	}
-
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
 	err := decoder.Decode(&params)
@@ -195,46 +204,18 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// respondWithJSON(w, http.StatusCreated, struct {
-    //     ID        string    `json:"id"`
-    //     CreatedAt time.Time `json:"created_at"`
-    //     UpdatedAt time.Time `json:"updated_at"`
-    //     Email     string    `json:"email"`
-    // }{
-    //     ID:        user.ID.String(),
-    //     CreatedAt: user.CreatedAt,
-    //     UpdatedAt: user.UpdatedAt,
-    //     Email:     user.Email,
-    // })
-	respBody := returnVals{
-		ID:        user.ID.String(),
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
-	}
-
-	dat, err := json.Marshal(respBody)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Something went wrong. Error marshalling JSON: %s", err))
-		return
-	}
-	
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(201)
-	w.Write(dat)
+	respondWithJSON(w, http.StatusCreated, User{
+        ID:        user.ID.String(),
+        CreatedAt: user.CreatedAt,
+        UpdatedAt: user.UpdatedAt,
+        Email:     user.Email,
+    })
 }
 
 func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body string `json:"body"`
 		UserID string `json:"user_id"`
-	}
-	type returnVals struct {
-		ID        string    `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Body      string    `json:"body"`
-		UserID    string    `json:"user_id"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -272,13 +253,35 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Failed to create chirp")
 		return
 	}
-	respondWithJSON(w, http.StatusCreated, returnVals{
-		ID:        chirp.ID.String(),
+	respondWithJSON(w, http.StatusCreated, Chirp{
+		ID:        chirp.ID,
 		CreatedAt: chirp.CreatedAt,
 		UpdatedAt: chirp.UpdatedAt,
 		Body:      chirp.Body,
-		UserID:    chirp.UserID.String(),
+		UserID:    chirp.UserID,
 	})
+}
+
+func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
+	dbChirps, err := cfg.DB.GetChirps(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to get chirps")
+		return
+	}
+
+	chirps := make([]Chirp, len(dbChirps))
+
+	for i, dbChirp := range dbChirps {
+		chirps[i] = Chirp{
+			ID:        dbChirp.ID,
+			CreatedAt: dbChirp.CreatedAt,
+			UpdatedAt: dbChirp.UpdatedAt,
+			Body:      dbChirp.Body,
+			UserID:    dbChirp.UserID,
+		}
+	}
+
+	respondWithJSON(w, http.StatusOK, chirps)
 }
 
 // respondWithError is a helper function to send JSON error responses.
