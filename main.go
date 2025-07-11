@@ -10,6 +10,7 @@ import (
 	"log"
 	"html/template"
     "encoding/json"
+	"regexp"
 )
 
 // apiConfig holds application configuration and shared state.
@@ -124,7 +125,7 @@ func handlerValidateChirp (w http.ResponseWriter, r *http.Request) {
 		Body string `json:"body"`
 	}
 	type returnVals struct {
-		Valid bool `json:"valid"`
+		CleanedBody string `json:"cleaned_body"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -143,11 +144,11 @@ func handlerValidateChirp (w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
 		return
 	}
-
-	// respondWithJSON(w, http.StatusOK, returnVals{Valid: true})
+	cleanedBody := replacer(params.Body)
+	// respondWithJSON(w, http.StatusOK, returnVals{CleanedBody: cleanedBody})
 	
 	respBody := returnVals{
-		Valid: true,
+		CleanedBody: cleanedBody,
 	}
 	dat, err := json.Marshal(respBody)
 	if err != nil {
@@ -174,4 +175,20 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(payload)
+}
+
+// replacer replaces banned words with asterisks
+// It takes a string input and returns a sanitized version
+// where "kerfuffle", "sharbert" and "fornax" are replaced with "****"
+func replacer (str string) string {
+	patterns := map[string]*regexp.Regexp{
+		"kerfuffle": regexp.MustCompile(`(?i)kerfuffle`),
+		"sharbert":  regexp.MustCompile(`(?i)sharbert`),
+		"fornax":    regexp.MustCompile(`(?i)fornax`),
+	}
+
+	for _, re := range patterns {
+		str = re.ReplaceAllString(str, "****")
+	}
+	return str
 }
