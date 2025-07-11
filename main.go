@@ -16,6 +16,8 @@ import (
 	"html/template"
     "encoding/json"
 	"regexp"
+	"time"
+	"strings"
 	
 	"github.com/BabichevDima/goServer/internal/database"
 )
@@ -122,6 +124,7 @@ func main() {
 	// API endpoints
 	mux.Handle("GET /api/healthz", middlewareLog(http.HandlerFunc(healthzHandler)))
 	mux.Handle("POST /api/validate_chirp", middlewareLog(http.HandlerFunc(handlerValidateChirp)))
+	mux.Handle("POST /api/users", middlewareLog(http.HandlerFunc(apiCfg.handlerCreateUser)))
 	mux.Handle("POST /admin/reset", middlewareLog(http.HandlerFunc(apiCfg.handlerReset)))
 	mux.Handle("GET /admin/metrics", middlewareLog(http.HandlerFunc(apiCfg.handlerMetrics)))
 	// mux.HandleFunc("GET /api/healthz", healthzHandler)
@@ -205,6 +208,71 @@ func handlerValidateChirp (w http.ResponseWriter, r *http.Request) {
 	
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	w.Write(dat)
+}
+
+func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email string `json:"email"`
+	}
+
+	type returnVals struct {
+		ID        string    `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	if params.Email == "" {
+		respondWithError(w, http.StatusBadRequest, "Email is required")
+		return
+	}
+
+	user, err := cfg.DB.CreateUser(r.Context(), params.Email)
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") {
+			respondWithError(w, http.StatusConflict, "Email already exists")
+			return
+		}
+		respondWithError(w, http.StatusInternalServerError, "Failed to create user")
+		return
+	}
+
+	// respondWithJSON(w, http.StatusCreated, struct {
+    //     ID        string    `json:"id"`
+    //     CreatedAt time.Time `json:"created_at"`
+    //     UpdatedAt time.Time `json:"updated_at"`
+    //     Email     string    `json:"email"`
+    // }{
+    //     ID:        user.ID.String(),
+    //     CreatedAt: user.CreatedAt,
+    //     UpdatedAt: user.UpdatedAt,
+    //     Email:     user.Email,
+    // })
+	respBody := returnVals{
+		ID:        user.ID.String(),
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+
+	dat, err := json.Marshal(respBody)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Something went wrong. Error marshalling JSON: %s", err))
+		return
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
 	w.Write(dat)
 }
 
