@@ -20,6 +20,7 @@ import (
 	"strings"
 	
 	"github.com/BabichevDima/goServer/internal/database"
+	"github.com/google/uuid"
 )
 
 // apiConfig holds application configuration and shared state.
@@ -123,13 +124,11 @@ func main() {
 
 	// API endpoints
 	mux.Handle("GET /api/healthz", middlewareLog(http.HandlerFunc(healthzHandler)))
-	mux.Handle("POST /api/validate_chirp", middlewareLog(http.HandlerFunc(handlerValidateChirp)))
 	mux.Handle("POST /api/users", middlewareLog(http.HandlerFunc(apiCfg.handlerCreateUser)))
+	mux.Handle("POST /api/chirps", middlewareLog(http.HandlerFunc(apiCfg.handlerCreateChirp)))
+
 	mux.Handle("POST /admin/reset", middlewareLog(http.HandlerFunc(apiCfg.handlerReset)))
 	mux.Handle("GET /admin/metrics", middlewareLog(http.HandlerFunc(apiCfg.handlerMetrics)))
-	// mux.HandleFunc("GET /api/healthz", healthzHandler)
-	// mux.HandleFunc("GET /api/metrics", apiCfg.handlerMetrics)
-	// mux.HandleFunc("POST /api/reset", apiCfg.handlerReset)
 
 	server := &http.Server{
 		Addr:    ":8080",
@@ -158,57 +157,6 @@ func healthzHandler (w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
-}
-
-// handlerValidateChirp handles POST requests to validate Chirps.
-// It expects a JSON body with a "body" field containing the chirp text.
-//
-// Valid chirps must:
-// - Exist (non-empty)
-// - Be 140 characters or less
-//
-// Responses:
-//   - 200 OK with {"valid":true} for valid chirps
-//   - 400 Bad Request with {"error":"message"} for invalid chirps or bad requests
-func handlerValidateChirp (w http.ResponseWriter, r *http.Request) {
-	type parameters struct {
-		Body string `json:"body"`
-	}
-	type returnVals struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-
-	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
-	err := decoder.Decode(&params)
-
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Something went wrong")
-		return
-	}
-
-	if params.Body == "" {
-		respondWithError(w, http.StatusBadRequest, "Chirp is empty")
-		return
-	} else if len(params.Body) > 140 {
-		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
-		return
-	}
-	cleanedBody := replacer(params.Body)
-	// respondWithJSON(w, http.StatusOK, returnVals{CleanedBody: cleanedBody})
-	
-	respBody := returnVals{
-		CleanedBody: cleanedBody,
-	}
-	dat, err := json.Marshal(respBody)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Something went wrong. Error marshalling JSON: %s", err))
-		return
-	}
-	
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	w.Write(dat)
 }
 
 func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -274,6 +222,63 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(201)
 	w.Write(dat)
+}
+
+func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body string `json:"body"`
+		UserID string `json:"user_id"`
+	}
+	type returnVals struct {
+		ID        string    `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserID    string    `json:"user_id"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Something went wrong")
+		return
+	}
+
+	if params.Body == "" {
+		respondWithError(w, http.StatusBadRequest, "Chirp is empty")
+		return
+	} else if len(params.Body) > 140 {
+		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+		return
+	}
+
+	cleanedBody := replacer(params.Body)
+	userID, err := uuid.Parse(params.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	chirp, err := cfg.DB.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   cleanedBody,
+		UserID: userID,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") {
+			respondWithError(w, http.StatusConflict, "Chirp already exists")
+			return
+		}
+		respondWithError(w, http.StatusInternalServerError, "Failed to create chirp")
+		return
+	}
+	respondWithJSON(w, http.StatusCreated, returnVals{
+		ID:        chirp.ID.String(),
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID.String(),
+	})
 }
 
 // respondWithError is a helper function to send JSON error responses.
