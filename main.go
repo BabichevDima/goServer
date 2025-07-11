@@ -4,6 +4,11 @@
 package main
 
 import (
+	_ "github.com/lib/pq"
+	"github.com/joho/godotenv"
+
+	"database/sql"
+	"os"
 	"fmt"
 	"net/http"
 	"sync/atomic"
@@ -11,6 +16,8 @@ import (
 	"html/template"
     "encoding/json"
 	"regexp"
+	
+	"github.com/BabichevDima/goServer/internal/database"
 )
 
 // apiConfig holds application configuration and shared state.
@@ -56,6 +63,23 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Hits reset to 0"))
 }
 
+func connectToBD() error {
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	fmt.Println("dbURL = ", dbURL)
+
+	//  sql.Open() a connection to your database
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to db: %w", err)
+	}
+
+	dbQueries := database.New(db)
+	fmt.Println("dbQueries = ", dbQueries)
+
+	return nil
+}
+
 // main initializes and starts the HTTP server on localhost:8080.
 // It sets up routes for:
 // - /app/ (file server with hit tracking)
@@ -64,6 +88,11 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 // - /api/metrics (hit counter metrics)
 // - /api/reset (hit counter reset)
 func main() {
+	// err := connectToBD()
+	if err := connectToBD(); err != nil {
+		fmt.Errorf("failed to connect to db:  %w", err)
+	}
+
 	fmt.Println("Server started on localhost:8080")
 	mux := http.NewServeMux()
 	apiCfg := &apiConfig{}

@@ -1,0 +1,44 @@
+1) Start the Postgres server in the background
+=> sudo service postgresql start
+
+2) Enter the psql shell:
+=>  sudo -u postgres psql
+
+3) Connect to the new database:
+=> \c chirpy
+
+4) Run the down migration
+=> goose postgres postgres://postgres:postgres@localhost:5432/chirpy?sslmode=disable down
+
+5) Run the up migration
+=> goose postgres postgres://postgres:postgres@localhost:5432/chirpy?sslmode=disable up
+
+
+==================== CREATE DATABASE chirpy ====================
+1) CREATE DATABASE chirpy;
+
+==================== SET PASSWORD ====================
+1) ALTER USER postgres WITH PASSWORD 'postgres';
+
+==================== Just connect to DB ====================
+1) Enter the psql shell:
+=>  sudo -u postgres psql
+
+2) Connect to the new database:
+=> \c chirpy
+
+==================== Generate the Go code ====================
+
+1) Generate the Go code with 
+=> sqlc generate
+
+==================== Connect to BD: ====================
+
+1) psql "postgres://postgres:@localhost:5432/chirpy" 
+
+--------------------- Проверьте строку подключения, выполнив psql, например: ---------------------
+1) psql "postgres://postgres:@localhost:5432/chirpy?sslmode=disable"
+2) PASSWORD: postgres
+
+goose postgres postgres://postgres:postgres@localhost:5432/chirpy?sslmode=disable up
+goose postgres postgres://postgres:postgres@localhost:5432/chirpy?sslmode=disable down
