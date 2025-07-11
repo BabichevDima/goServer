@@ -23,7 +23,8 @@ import (
 // apiConfig holds application configuration and shared state.
 // The fileserverHits field tracks the number of requests made to the fileserver.
 type apiConfig struct {
-	fileserverHits atomic.Int32
+	fileserverHits	atomic.Int32
+	DB				*database.Queries 
 }
 
 // middlewareMetricsInc creates a middleware that increments the hit counter
@@ -63,7 +64,21 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Hits reset to 0"))
 }
 
-func connectToBD() error {
+// connectToDB establishes a connection to the PostgreSQL database using the connection URL
+// from the environment variable DB_URL (loaded via .env file).
+//
+// It returns:
+//   - *database.Queries: A prepared queries object for database operations
+//   - error: Any error that occurred during connection (e.g., environment loading failure,
+//     invalid connection URL, or connection failure)
+//
+// Example usage:
+//   queries, err := connectToDB()
+//   if err != nil {
+//       log.Fatal(err)
+//   }
+//   defer queries.Close()
+func connectToBD() (*database.Queries, error) {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	fmt.Println("dbURL = ", dbURL)
@@ -71,13 +86,12 @@ func connectToBD() error {
 	//  sql.Open() a connection to your database
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
-		return fmt.Errorf("failed to connect to db: %w", err)
+		return nil, fmt.Errorf("failed to connect to db: %w", err)
 	}
 
 	dbQueries := database.New(db)
-	fmt.Println("dbQueries = ", dbQueries)
 
-	return nil
+	return dbQueries, nil
 }
 
 // main initializes and starts the HTTP server on localhost:8080.
@@ -88,14 +102,18 @@ func connectToBD() error {
 // - /api/metrics (hit counter metrics)
 // - /api/reset (hit counter reset)
 func main() {
-	// err := connectToBD()
-	if err := connectToBD(); err != nil {
-		fmt.Errorf("failed to connect to db:  %w", err)
+	dbQueries, err := connectToBD()
+	// fmt.Println("dbQueries = ", dbQueries)
+
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
 	fmt.Println("Server started on localhost:8080")
 	mux := http.NewServeMux()
-	apiCfg := &apiConfig{}
+	apiCfg := &apiConfig{
+		DB: dbQueries,
+	}
 
 	// Fileservers
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir("./")))))
@@ -115,7 +133,7 @@ func main() {
 		Handler: mux,
 	}
 
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 
 	if err != nil {
 		panic(err)
