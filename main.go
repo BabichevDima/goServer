@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync/atomic"
 	"log"
+	"html/template"
 )
 
 // apiConfig holds application configuration and shared state.
@@ -26,12 +27,22 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 // handlerMetrics writes the current hit count in the format "Hits: N".
-// It responds with Content-Type: text/plain and HTTP 200 status.
+// It responds with Content-Type: text/html and HTTP 200 status.
 func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	hits := cfg.fileserverHits.Load()
-	w.Write([]byte(fmt.Sprintf("Hits: %d", hits)))
+	tmpl := template.Must(template.New("metrics").Parse(`
+	<html>
+	<body>
+		<h1>Welcome, Chirpy Admin</h1>
+		<p>Chirpy has been visited {{.}} times!</p>
+	</body>
+	</html>
+	`))
+    
+    tmpl.Execute(w, hits)
+
 }
 
 // handlerReset sets the hit counter back to zero.
@@ -61,8 +72,8 @@ func main() {
 
 	// API endpoints
 	mux.Handle("GET /api/healthz", middlewareLog(http.HandlerFunc(healthzHandler)))
-	mux.Handle("GET /api/metrics", middlewareLog(http.HandlerFunc(apiCfg.handlerMetrics)))
-	mux.Handle("POST /api/reset", middlewareLog(http.HandlerFunc(apiCfg.handlerReset)))
+	mux.Handle("POST /admin/reset", middlewareLog(http.HandlerFunc(apiCfg.handlerReset)))
+	mux.Handle("GET /admin/metrics", middlewareLog(http.HandlerFunc(apiCfg.handlerMetrics)))
 	// mux.HandleFunc("GET /api/healthz", healthzHandler)
 	// mux.HandleFunc("GET /api/metrics", apiCfg.handlerMetrics)
 	// mux.HandleFunc("POST /api/reset", apiCfg.handlerReset)
