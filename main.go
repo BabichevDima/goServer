@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"log"
 	"html/template"
+    "encoding/json"
 )
 
 // apiConfig holds application configuration and shared state.
@@ -72,6 +73,7 @@ func main() {
 
 	// API endpoints
 	mux.Handle("GET /api/healthz", middlewareLog(http.HandlerFunc(healthzHandler)))
+	mux.Handle("POST /api/validate_chirp", middlewareLog(http.HandlerFunc(handlerValidateChirp)))
 	mux.Handle("POST /admin/reset", middlewareLog(http.HandlerFunc(apiCfg.handlerReset)))
 	mux.Handle("GET /admin/metrics", middlewareLog(http.HandlerFunc(apiCfg.handlerMetrics)))
 	// mux.HandleFunc("GET /api/healthz", healthzHandler)
@@ -105,4 +107,71 @@ func healthzHandler (w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
+}
+
+// handlerValidateChirp handles POST requests to validate Chirps.
+// It expects a JSON body with a "body" field containing the chirp text.
+//
+// Valid chirps must:
+// - Exist (non-empty)
+// - Be 140 characters or less
+//
+// Responses:
+//   - 200 OK with {"valid":true} for valid chirps
+//   - 400 Bad Request with {"error":"message"} for invalid chirps or bad requests
+func handlerValidateChirp (w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body string `json:"body"`
+	}
+	type returnVals struct {
+		Valid bool `json:"valid"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Something went wrong")
+		return
+	}
+
+	if params.Body == "" {
+		respondWithError(w, http.StatusBadRequest, "Chirp is empty")
+		return
+	} else if len(params.Body) > 140 {
+		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+		return
+	}
+
+	// respondWithJSON(w, http.StatusOK, returnVals{Valid: true})
+	
+	respBody := returnVals{
+		Valid: true,
+	}
+	dat, err := json.Marshal(respBody)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Something went wrong. Error marshalling JSON: %s", err))
+		return
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(dat)
+}
+
+// respondWithError is a helper function to send JSON error responses.
+// It sets the appropriate content type and HTTP status code,
+// then encodes the error message as JSON.
+func respondWithError(w http.ResponseWriter, code int, message string) {
+    respondWithJSON(w, code, map[string]string{"error": message})
+}
+
+// respondWithJSON is a helper function to send JSON responses.
+// It sets the Content-Type header to application/json,
+// writes the HTTP status code, and encodes the payload as JSON.
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(payload)
 }
