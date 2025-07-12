@@ -1,9 +1,10 @@
 -- name: CreateUser :one
-INSERT INTO users (email)
+INSERT INTO users (email, hashed_password)
 VALUES (
-    $1
+    $1,
+    $2
     )
-RETURNING *;
+RETURNING id, created_at, updated_at, email;
 
 -- name: CreateChirp :one
 INSERT INTO chirps (body, user_id)
@@ -20,3 +21,7 @@ ORDER BY created_at;
 -- name: GetChirp :one
 SELECT * FROM chirps
 WHERE id = $1;
+
+-- name: GetUserByEmail :one
+SELECT * FROM users
+WHERE email = $1;

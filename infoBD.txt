@@ -42,3 +42,7 @@
 
 goose postgres postgres://postgres:postgres@localhost:5432/chirpy?sslmode=disable up
 goose postgres postgres://postgres:postgres@localhost:5432/chirpy?sslmode=disable down
+
+
+=========START APP =============
+=> go build -o out && ./out
