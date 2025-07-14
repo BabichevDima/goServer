@@ -27,6 +27,7 @@ import (
 // apiConfig holds application configuration and shared state.
 // The fileserverHits field tracks the number of requests made to the fileserver.
 type apiConfig struct {
+	jwtSecret		string
 	fileserverHits	atomic.Int32
 	DB				*database.Queries 
 }
@@ -36,6 +37,7 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+	Token     string    `json:"token,omitempty"`
 }
 
 type Chirp struct {
@@ -97,20 +99,21 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 //       log.Fatal(err)
 //   }
 //   defer queries.Close()
-func connectToBD() (*database.Queries, error) {
+func connectToBD() (*database.Queries, string, error) {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
+	jwtSecret := os.Getenv("JWT_SECRET")
 	fmt.Println("dbURL = ", dbURL)
 
 	//  sql.Open() a connection to your database
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to db: %w", err)
+		return nil, "", fmt.Errorf("failed to connect to db: %w", err)
 	}
 
 	dbQueries := database.New(db)
 
-	return dbQueries, nil
+	return dbQueries, jwtSecret, nil
 }
 
 // main initializes and starts the HTTP server on localhost:8080.
@@ -121,7 +124,7 @@ func connectToBD() (*database.Queries, error) {
 // - /api/metrics (hit counter metrics)
 // - /api/reset (hit counter reset)
 func main() {
-	dbQueries, err := connectToBD()
+	dbQueries, jwtSecret, err := connectToBD()
 	// fmt.Println("dbQueries = ", dbQueries)
 
 	if err != nil {
@@ -132,6 +135,11 @@ func main() {
 	mux := http.NewServeMux()
 	apiCfg := &apiConfig{
 		DB: dbQueries,
+		jwtSecret: jwtSecret,
+	}
+
+	if apiCfg.jwtSecret == "" {
+		log.Fatal("JWT_SECRET environment variable is not set")
 	}
 
 	// Fileservers
@@ -232,6 +240,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Email string `json:"email"`
 		Password string `json:"password"`
+		ExpiresInSeconds int    `json:"expires_in_seconds"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -251,6 +260,21 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expiration := time.Duration(params.ExpiresInSeconds) * time.Second
+	defaultExpiration := time.Hour
+	maxExpiration := time.Hour
+	fmt.Println( )
+	fmt.Println("params.ExpiresInSeconds", params.ExpiresInSeconds)
+	fmt.Println("expiration", expiration)
+	fmt.Println( )
+
+	switch {
+	case params.ExpiresInSeconds == 0:
+		expiration = defaultExpiration
+	case expiration > maxExpiration:
+		expiration = maxExpiration
+	}
+
 	user, err := cfg.DB.GetUserByEmail(r.Context(), params.Email)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to get user")
@@ -262,23 +286,42 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	token, err := auth.MakeJWT(user.ID, cfg.jwtSecret, expiration)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to create token")
+		return
+	}
+
 	respondWithJSON(w, http.StatusOK, User{
 		ID:        user.ID.String(),
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
+		Token:     token,
 	})
 }
 
 func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body string `json:"body"`
-		UserID string `json:"user_id"`
 	}
+
+	// GetBearerToken
+	token, err := auth.GetBearerToken(r.Header)
+    if err != nil {
+        respondWithError(w, http.StatusUnauthorized, "Authentication required")
+        return
+    }
+
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+    if err != nil {
+        respondWithError(w, http.StatusUnauthorized, "Invalid token")
+        return
+    }
 
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Something went wrong")
 		return
@@ -293,11 +336,6 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 	}
 
 	cleanedBody := replacer(params.Body)
-	userID, err := uuid.Parse(params.UserID)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid user ID")
-		return
-	}
 
 	chirp, err := cfg.DB.CreateChirp(r.Context(), database.CreateChirpParams{
 		Body:   cleanedBody,
