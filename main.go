@@ -151,12 +151,14 @@ func main() {
 	// API endpoints
 	mux.Handle("GET /api/healthz", middlewareLog(http.HandlerFunc(healthzHandler)))
 	mux.Handle("POST /api/users", middlewareLog(http.HandlerFunc(apiCfg.handlerCreateUser)))
+	mux.Handle("PUT /api/users", middlewareLog(http.HandlerFunc(apiCfg.handlerUpdateUser)))
 	mux.Handle("POST /api/login", middlewareLog(http.HandlerFunc(apiCfg.handlerLogin)))
 	mux.Handle("POST /api/refresh", middlewareLog(http.HandlerFunc(apiCfg.handlerRefresh)))
 	mux.Handle("POST /api/revoke", middlewareLog(http.HandlerFunc(apiCfg.handlerRevoke)))
 	mux.Handle("POST /api/chirps", middlewareLog(http.HandlerFunc(apiCfg.handlerCreateChirp)))
 	mux.Handle("GET /api/chirps", middlewareLog(http.HandlerFunc(apiCfg.handlerGetChirps)))
 	mux.Handle("GET /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiCfg.handlerGetChirp)))
+	mux.Handle("DELETE /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiCfg.handlerDeleteChirp)))
 
 	mux.Handle("POST /admin/reset", middlewareLog(http.HandlerFunc(apiCfg.handlerReset)))
 	mux.Handle("GET /admin/metrics", middlewareLog(http.HandlerFunc(apiCfg.handlerMetrics)))
@@ -233,6 +235,91 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	respondWithJSON(w, http.StatusCreated, User{
+		ID:        user.ID.String(),
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	})
+}
+
+func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	userID, err := auth.ValidateJWT(accessToken, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid access Token")
+		return
+	}
+
+	type parameters struct {
+		Email string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err = decoder.Decode(&params)
+
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+    if params.Email == "" || params.Password == "" {
+        respondWithError(w, http.StatusBadRequest, "Email and password are required")
+        return
+    }
+
+	hashPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to hash password")
+		return
+	}
+
+	currentUser, err := cfg.DB.GetUserByID(r.Context(), userID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to get user data")
+		return
+	}
+
+	if currentUser.Email == params.Email {
+		user, err := cfg.DB.UpdateUserCredentials(r.Context(), database.UpdateUserCredentialsParams{
+			Email:         params.Email,
+			HashedPassword: hashPassword,
+			ID:            userID,
+		})
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to update user")
+			return
+		}
+		respondWithJSON(w, http.StatusOK, User{
+			ID:        user.ID.String(),
+			Email:     user.Email,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+		})
+		return
+	}
+
+	user, err := cfg.DB.UpdateUserCredentials(r.Context(), database.UpdateUserCredentialsParams{
+		Email:			params.Email,
+		HashedPassword:	hashPassword,
+		ID:             userID,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "unique constraint") {
+			respondWithError(w, http.StatusConflict, "Email already in use")
+			return
+		}
+		respondWithError(w, http.StatusInternalServerError, "Failed to update user")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, User{
 		ID:        user.ID.String(),
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
@@ -356,16 +443,16 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 	}
 
 	token, err := auth.GetBearerToken(r.Header)
-    if err != nil {
-        respondWithError(w, http.StatusUnauthorized, "Authentication required")
-        return
-    }
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
 
 	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
-    if err != nil {
-        respondWithError(w, http.StatusUnauthorized, "Invalid token")
-        return
-    }
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid token")
+		return
+	}
 
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
@@ -409,7 +496,7 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
 	dbChirps, err := cfg.DB.GetChirps(r.Context())
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to get chirps")
+		respondWithError(w, http.StatusNotFound, "Failed to get chirps")
 		return
 	}
 
@@ -439,7 +526,7 @@ func (cfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
 
 	dbChirp, err := cfg.DB.GetChirp(r.Context(), chirpID)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to get chirp")
+		respondWithError(w, http.StatusNotFound, "Failed to get chirp")
 		return
 	}
 
@@ -450,6 +537,44 @@ func (cfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
 		Body:      dbChirp.Body,
 		UserID:    dbChirp.UserID,
 	})
+}
+
+func (cfg *apiConfig) handlerDeleteChirp(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	userID, err := auth.ValidateJWT(accessToken, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, http.StatusForbidden, "not allow")
+		return
+	}
+
+	chirpIDStr := r.PathValue("chirpID")
+	chirpID, err := uuid.Parse(chirpIDStr)
+
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid chirpID format")
+		return
+	}
+
+	result, err := cfg.DB.DeleteChirp(r.Context(), database.DeleteChirpParams{
+		ID:     chirpID,
+		UserID: userID,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to delete chirp")
+		return
+	}
+
+	if result == 0 {
+		respondWithError(w, http.StatusForbidden, "You can't delete this chirp")
+		return
+	}
+
+	respondWithJSON(w, http.StatusNoContent, nil)
 }
 
 // respondWithError is a helper function to send JSON error responses.
