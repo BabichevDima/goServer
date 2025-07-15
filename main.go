@@ -30,7 +30,8 @@ import (
 type apiConfig struct {
 	jwtSecret		string
 	fileserverHits	atomic.Int32
-	DB				*database.Queries 
+	DB				*database.Queries
+	polkaKey		string
 }
 
 type User struct {
@@ -102,21 +103,22 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 //       log.Fatal(err)
 //   }
 //   defer queries.Close()
-func connectToBD() (*database.Queries, string, error) {
+func connectToBD() (*database.Queries, string, string, error) {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	jwtSecret := os.Getenv("JWT_SECRET")
+	polkaKey := os.Getenv("POLKA_KEY")
 	fmt.Println("dbURL = ", dbURL)
 
 	//  sql.Open() a connection to your database
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to connect to db: %w", err)
+		return nil, "", "", fmt.Errorf("failed to connect to db: %w", err)
 	}
 
 	dbQueries := database.New(db)
 
-	return dbQueries, jwtSecret, nil
+	return dbQueries, jwtSecret, polkaKey, nil
 }
 
 // main initializes and starts the HTTP server on localhost:8080.
@@ -127,7 +129,7 @@ func connectToBD() (*database.Queries, string, error) {
 // - /api/metrics (hit counter metrics)
 // - /api/reset (hit counter reset)
 func main() {
-	dbQueries, jwtSecret, err := connectToBD()
+	dbQueries, jwtSecret, polkaKey, err := connectToBD()
 	// fmt.Println("dbQueries = ", dbQueries)
 
 	if err != nil {
@@ -137,8 +139,9 @@ func main() {
 	fmt.Println("Server started on localhost:8080")
 	mux := http.NewServeMux()
 	apiCfg := &apiConfig{
-		DB: dbQueries,
+		DB:        dbQueries,
 		jwtSecret: jwtSecret,
+		polkaKey:  polkaKey,
 	}
 
 	if apiCfg.jwtSecret == "" {
@@ -501,6 +504,22 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 }
 
 func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
+	author_id := r.URL.Query().Get("author_id")
+	if author_id != "" {
+		authorUUID, err := uuid.Parse(author_id)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid author_id format")
+			return
+		}
+		chirps, err := cfg.DB.GetChirpByUserId(r.Context(), authorUUID)
+		if err != nil {
+			respondWithError(w, http.StatusNotFound, "Failed to get chirps by author")
+			return
+		}
+
+		respondWithJSON(w, http.StatusOK, chirps)
+		return
+	}
 	dbChirps, err := cfg.DB.GetChirps(r.Context())
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Failed to get chirps")
@@ -617,6 +636,12 @@ func replacer (str string) string {
 }
 
 func (cfg *apiConfig) handlerWebhooks(w http.ResponseWriter, r *http.Request) {
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil || apiKey != cfg.polkaKey {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
 	type parameters struct {
 		Event string `json:"event"`
 		Data  struct {
@@ -626,7 +651,7 @@ func (cfg *apiConfig) handlerWebhooks(w http.ResponseWriter, r *http.Request) {
 
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Something went wrong")
 		return
