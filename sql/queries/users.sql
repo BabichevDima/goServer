@@ -4,7 +4,7 @@ VALUES (
     $1,
     $2
     )
-RETURNING id, created_at, updated_at, email;
+RETURNING id, created_at, updated_at, email, is_chirpy_red;
 
 -- name: CreateChirp :one
 INSERT INTO chirps (body, user_id)
@@ -59,7 +59,14 @@ SET
     hashed_password = $2,
     updated_at = NOW()
 WHERE id = $3
-RETURNING id, email, created_at, updated_at;
+RETURNING id, email, created_at, updated_at, is_chirpy_red;
+
+-- name: UpdateUserIsChirpyRed :one
+UPDATE users
+SET is_chirpy_red = true,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, created_at, updated_at, email, is_chirpy_red;
 
 -- name: DeleteChirp :execrows
 DELETE FROM chirps

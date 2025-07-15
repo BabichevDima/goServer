@@ -40,6 +40,7 @@ type User struct {
 	Email        string    `json:"email"`
 	Token        string    `json:"token,omitempty"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
+	IsChirpyRed  bool      `json:"is_chirpy_red"`
 }
 
 type Chirp struct {
@@ -159,6 +160,8 @@ func main() {
 	mux.Handle("GET /api/chirps", middlewareLog(http.HandlerFunc(apiCfg.handlerGetChirps)))
 	mux.Handle("GET /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiCfg.handlerGetChirp)))
 	mux.Handle("DELETE /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiCfg.handlerDeleteChirp)))
+	
+	mux.Handle("POST /api/polka/webhooks", middlewareLog(http.HandlerFunc(apiCfg.handlerWebhooks)))
 
 	mux.Handle("POST /admin/reset", middlewareLog(http.HandlerFunc(apiCfg.handlerReset)))
 	mux.Handle("GET /admin/metrics", middlewareLog(http.HandlerFunc(apiCfg.handlerMetrics)))
@@ -235,10 +238,11 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	respondWithJSON(w, http.StatusCreated, User{
-		ID:        user.ID.String(),
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
+		ID:          user.ID.String(),
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	})
 }
 
@@ -297,10 +301,11 @@ func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		respondWithJSON(w, http.StatusOK, User{
-			ID:        user.ID.String(),
-			Email:     user.Email,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
+			ID:          user.ID.String(),
+			Email:       user.Email,
+			CreatedAt:   user.CreatedAt,
+			UpdatedAt:   user.UpdatedAt,
+			IsChirpyRed: user.IsChirpyRed,
 		})
 		return
 	}
@@ -320,10 +325,11 @@ func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	respondWithJSON(w, http.StatusOK, User{
-		ID:        user.ID.String(),
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
+		ID:          user.ID.String(),
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	})
 }
 
@@ -387,6 +393,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		Email:        user.Email,
 		Token:        accessToken,
 		RefreshToken: refreshToken,
+		IsChirpyRed:  user.IsChirpyRed,
 	})
 }
 
@@ -607,4 +614,42 @@ func replacer (str string) string {
 		str = re.ReplaceAllString(str, "****")
 	}
 	return str
+}
+
+func (cfg *apiConfig) handlerWebhooks(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Something went wrong")
+		return
+	}
+
+	if params.Event == "" || params.Event != "user.upgraded" {
+		respondWithError(w, http.StatusNoContent, "Event is empty or we don't care about this events")
+		return
+	} else if params.Data.UserID == "" {
+		respondWithError(w, http.StatusBadRequest, "UserID is empty")
+		return
+	}
+
+	userUUID, err := uuid.Parse(params.Data.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid UserID format")
+		return
+	}
+
+	if _, err := cfg.DB.UpdateUserIsChirpyRed(r.Context(), userUUID); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to update user")
+		return
+	}
+
+	respondWithJSON(w, http.StatusNoContent, nil)
 }

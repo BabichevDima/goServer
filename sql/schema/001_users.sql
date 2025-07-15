@@ -7,6 +7,9 @@ CREATE TABLE users (
 );
 
 ALTER TABLE users
+ADD COLUMN is_chirpy_red BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE users
 ADD COLUMN hashed_password TEXT NOT NULL DEFAULT 'unset';
 
 ALTER TABLE users
@@ -43,6 +46,9 @@ CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
 DROP TABLE IF EXISTS refresh_tokens;
 
 DROP TABLE chirps;
+
+ALTER TABLE users
+DROP COLUMN is_chirpy_red;
 
 ALTER TABLE users
 DROP COLUMN hashed_password;
