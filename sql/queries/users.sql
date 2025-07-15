@@ -60,3 +60,8 @@ SET
     updated_at = NOW()
 WHERE id = $3
 RETURNING id, email, created_at, updated_at;
+
+-- name: DeleteChirp :execrows
+DELETE FROM chirps
+WHERE id = $1
+AND user_id = $2;

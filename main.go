@@ -158,6 +158,7 @@ func main() {
 	mux.Handle("POST /api/chirps", middlewareLog(http.HandlerFunc(apiCfg.handlerCreateChirp)))
 	mux.Handle("GET /api/chirps", middlewareLog(http.HandlerFunc(apiCfg.handlerGetChirps)))
 	mux.Handle("GET /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiCfg.handlerGetChirp)))
+	mux.Handle("DELETE /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiCfg.handlerDeleteChirp)))
 
 	mux.Handle("POST /admin/reset", middlewareLog(http.HandlerFunc(apiCfg.handlerReset)))
 	mux.Handle("GET /admin/metrics", middlewareLog(http.HandlerFunc(apiCfg.handlerMetrics)))
@@ -495,7 +496,7 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
 	dbChirps, err := cfg.DB.GetChirps(r.Context())
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to get chirps")
+		respondWithError(w, http.StatusNotFound, "Failed to get chirps")
 		return
 	}
 
@@ -525,7 +526,7 @@ func (cfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
 
 	dbChirp, err := cfg.DB.GetChirp(r.Context(), chirpID)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to get chirp")
+		respondWithError(w, http.StatusNotFound, "Failed to get chirp")
 		return
 	}
 
@@ -536,6 +537,44 @@ func (cfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
 		Body:      dbChirp.Body,
 		UserID:    dbChirp.UserID,
 	})
+}
+
+func (cfg *apiConfig) handlerDeleteChirp(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	userID, err := auth.ValidateJWT(accessToken, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, http.StatusForbidden, "not allow")
+		return
+	}
+
+	chirpIDStr := r.PathValue("chirpID")
+	chirpID, err := uuid.Parse(chirpIDStr)
+
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid chirpID format")
+		return
+	}
+
+	result, err := cfg.DB.DeleteChirp(r.Context(), database.DeleteChirpParams{
+		ID:     chirpID,
+		UserID: userID,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to delete chirp")
+		return
+	}
+
+	if result == 0 {
+		respondWithError(w, http.StatusForbidden, "You can't delete this chirp")
+		return
+	}
+
+	respondWithJSON(w, http.StatusNoContent, nil)
 }
 
 // respondWithError is a helper function to send JSON error responses.
