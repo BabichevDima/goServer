@@ -26,6 +26,11 @@ WHERE id = $1;
 SELECT * FROM users
 WHERE email = $1;
 
+-- name: GetUserByID :one
+SELECT * FROM users
+WHERE id = $1;
+
+
 -- name: CreateRefreshToken :one
 INSERT INTO refresh_tokens (token, user_id, expires_at)
 VALUES ($1, $2, $3)
@@ -46,3 +51,12 @@ JOIN refresh_tokens ON users.id = refresh_tokens.user_id
 WHERE refresh_tokens.token = $1
 AND refresh_tokens.revoked_at IS NULL
 AND refresh_tokens.expires_at > NOW();
+
+-- name: UpdateUserCredentials :one
+UPDATE users 
+SET 
+    email = $1,
+    hashed_password = $2,
+    updated_at = NOW()
+WHERE id = $3
+RETURNING id, email, created_at, updated_at;
