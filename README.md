@@ -38,7 +38,11 @@ A Twitter-like microblogging service API built with Go and PostgreSQL.
 
 3. Run the server:
    ```bash
-   go run main.go
+   1) sudo service postgresql start
+   2) sudo -u postgres psql
+   3) \c chirpy
+   4) goose postgres postgres://postgres:postgres@localhost:5432/chirpy?sslmode=disable up
+   5) goose postgres postgres://postgres:postgres@localhost:5432/chirpy?sslmode=disable up
    ```
 
 ## API Documentation

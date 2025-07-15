@@ -19,6 +19,7 @@ import (
 	"time"
 	"strings"
 	"errors"
+	"sort"
 	
 	"github.com/BabichevDima/goServer/internal/database"
 	"github.com/BabichevDima/goServer/internal/auth"
@@ -521,6 +522,14 @@ func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dbChirps, err := cfg.DB.GetChirps(r.Context())
+
+	sortParam := r.URL.Query().Get("sort")
+	if sortParam == "desc" {
+		sort.Slice(dbChirps, func(i, j int) bool { 
+		return dbChirps[j].CreatedAt.Before(dbChirps[i].CreatedAt) 
+		})
+	}
+
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Failed to get chirps")
 		return
